@@ -123,7 +123,7 @@ def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z
         - A point cloud at Path(output_path) containing all the same attributes as the origical point cloud but also containing a classification value.
     '''
 
-    pc = np.load_function(Path(point_cloud_socs)) # a tensor built by a yet uknown to me loading funtion
+    pc = o3d.io.read_point_cloud(Path(point_cloud_socs)) # should I use the newer tensor version?
     pc_cmcs = o3d.geometry.PointCloud()
     camera_intrinsics = paths['intrinsics']
     
@@ -133,16 +133,13 @@ def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z
     dy = 0.00000376
     nx = 9504
     ny = 6336
-
-    K = np.array([(fx*dx)/nx, 0, cx, 0],
+    ax = (fx * dx) / nx
+    ay = (fy * dy) / ny
+    
+    '''K = np.array([(fx*dx)/nx, 0, cx, 0],
                  [0, (fy*dy)/ny, cy, 0],
-                 [0, 0, 1, 0])
+                 [0, 0, 1, 0])'''
 
-
-
-    # 3-D Pythagoras re-arranges to solve for z
-    z = depth_image / np.sqrt(1. + x_over_z**2 + y_over_z**2)
-    x = x_over_z * z
 
     for img in range(len(images)):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
@@ -150,5 +147,11 @@ def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z
         MM = np.loadtext(Path(f"{paths['matrices']}/mounting.dat") , delimiter=',') # the mounting matrix for img
         
         width, height = images[img].shape
-        
-        pc_cmcs = o3d.geometry.PointCloud(pc).Transform(z_rot).Transform(MM)
+
+        pc_cmcs = o3d.geometry.PointCloud(pc).Transform(z_rot).Transform(MM) # Transform the point cloud into the camera's reference frame
+
+        pts = np.asarray(pc.points)
+
+        for i, (x, y, z) in enumerate(pts):
+            n = ((ax * x) / z) + cx
+            m = ((ay * y) / z) + cy
