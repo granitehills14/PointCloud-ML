@@ -20,7 +20,8 @@ from pathlib import Path
 
 # ===== COLORIZE_FROM_MASK.PY PSEUDO-CODE OUTLINE =====
 
-#%% Step 1: Establish Script-Wide Paths
+#%% Step 1: Establish Script-Wide Variables and Paths
+num_classes = 5
 SCENE = "Basement"
 SCANPOS = "ScanPos001"
 project_dir = f"pcml/data/riegl/{SCENE}"
@@ -93,7 +94,7 @@ def glcs_to_socs(point_cloud, PRCS_GLCS, SOCS_PRCS, point_cloud_socs_path):
     np.save_function(pc_socs, Path(point_cloud_socs_path)) # save the transformed point cloud using a yet unknown to me saving function?
 
 
-def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z_ROTATION, output_path):
+def classify_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z_ROTATION, output_path):
     '''
     A. For each image:
         1) Transform the points into the camera's reference frame
@@ -123,10 +124,29 @@ def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z
         - A point cloud at Path(output_path) containing all the same attributes as the origical point cloud but also containing a classification value.
     '''
 
-    pc = o3d.io.read_point_cloud(Path(point_cloud_socs)) # should I use the newer tensor version?
-    pc_cmcs = o3d.geometry.PointCloud()
-    camera_intrinsics = paths['intrinsics']
+    pc = o3d.t.io.read_point_cloud(Path(point_cloud_socs)) # read-in the SOCS point cloud
+
+    N = pc.point.positions.shape[0] # number of points
+    device = pc.point.positions.device # is the point cloud on CPU or GPU
+
+    pc_cmcs = o3d.t.geometry.PointCloud(pc) # clone pc to be transformed later
+
+    pc_cmcs.point.px_vals = o3d.core.Tensor( 
+    # (N x len(images)) tensor storing 1 px val per point per image
+        np.full((N, len(images)), -1, dtype=np.int32),
+        dtype = o3d.core.int32,
+        device = device
+    )
     
+    pc_cmcs.point.class_votes = o3d.core.Tensor( 
+    # (N x num_classes) tensor storing the counts of each px_val for each point
+        np.full((N, num_classes), 0, dtype=np.int32),
+        dtype = o3d.core.int32,
+        device = device
+    )
+
+    camera_intrinsics = paths['intrinsics']
+
     fx, fy = camera_intrinsics[0, 0], camera_intrinsics[1, 1]
     cx, cy = camera_intrinsics[0, 2], camera_intrinsics[1, 2]
     dx = 0.00000376
@@ -140,18 +160,35 @@ def colorize_point_cloud(point_cloud_socs, images, mask_intrinsics, CMCS_SOCS, Z
                  [0, (fy*dy)/ny, cy, 0],
                  [0, 0, 1, 0])'''
 
-
-    for img in range(len(images)):
+    for j, img in enumerate(images):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
         z_rot = np.loadtxt(Path(f"{paths['matrices']}/{images[img]}.dat"), delimiter=',') # the z-rotation matrix for img
         MM = np.loadtext(Path(f"{paths['matrices']}/mounting.dat") , delimiter=',') # the mounting matrix for img
-        
-        width, height = images[img].shape
 
         pc_cmcs = o3d.geometry.PointCloud(pc).Transform(z_rot).Transform(MM) # Transform the point cloud into the camera's reference frame
 
-        pts = np.asarray(pc.points)
+        pts = pc_cmcs.points.positions.numpy() # make the point cloud into something through which I can loop.
 
-        for i, (x, y, z) in enumerate(pts):
-            n = ((ax * x) / z) + cx
-            m = ((ay * y) / z) + cy
+        for i, (x, y, z) in enumerate(pts): # loop through each point 
+            n = ((ax * x) / z) + cx # find the x-pixel the point projects to
+            m = ((ay * y) / z) + cy # find the y-pizel the point projects to
+
+            if not np.isnan(img[n,m]): # if there is a pixel value associated with the point
+                pc_cmcs.point.px_vals[i,j] = img[n,m] # push the pixel value to px_vals for each point
+                    
+    for p, row in enumerate(pts): # for every point
+        for c in range(num_classes): # and for each class
+            pc_cmcs.point.class_votes[p,c] = np.count_nonzero(row == c) # set the value of class_votes[p,c] to the number of occurances of that class
+
+    for p, row in enumerate(pc_cmcs.point.class_votes): # for each point
+        pc_cmcs.point.classification[p] = pc_cmcs.point.class_votes[p,np.int32(np.argmax(row))] # set the classification value to the value of the column index with the most votes. In the case where there is a tie the smaller index gets chosen by this. I had an idea of using kNN as a tie-breaker but that might be too complex for now. 
+
+    pc_cmcs.point.classification = o3d.core.Tensor(
+        # (N, ) tensor storing the derived classification value for each point
+        np.argmax(row) for row in pc_cmcs.point.class_votes,
+        dtype = o3d.core.int32,
+        device = device
+        )
+    
+
+     
