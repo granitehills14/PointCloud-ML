@@ -1,5 +1,7 @@
+#%% Step 0: Import Packages
 import os
 import numpy as np
+import laspy
 from numpy.linalg import inv
 import open3d as o3d
 from scipy.spatial import cKDTree
@@ -29,6 +31,7 @@ scanpos_dir = f"pcml/data/riegl/{SCENE}/{SCANPOS}"
 
 paths = {
     'data' : os.path.join(scanpos_dir, "DATA"),
+    'out' : os.path.join(project_dir, "EXPORT"),
     'raw' : os.path.join(scanpos_dir, "CAM/images/raw"),
     'masks' : os.path.join(scanpos_dir, "CAM/images/masks"),
     'matrices' : os.path.join(scanpos_dir, "CAM/matrices"),
@@ -38,10 +41,10 @@ paths = {
 }
 
 #%% Step 2: Load Data
-def load_pngs_from_folder(folder):
-    folder = paths['masks']
+def load_pngs_from_folder(mask_folder):
+    mask_folder = paths['masks']
     image_paths = sorted([
-        p for p in folder.iterdir()
+        p for p in mask_folder.iterdir()
         if p.suffix.lower() == ".png" and not p.stem.endswith("_color")
         ])
 
@@ -57,13 +60,41 @@ def load_pngs_from_folder(folder):
         valid_paths.append(p)
     return images, valid_paths
 
-#%% Step 3: Transformations
+def load_point_cloud(pc_folder): # there should only ever be 1 point cloud in the directory. Not sure if this is coded properly for that. 
+    pc_folder = paths['data']
+    pc_paths = sorted([
+        p for p in pc_folder.iterdir()
+        if p.suffix.lower() == ".laz" or p.suffix.lower() == ".las"
+    ])
 
+    pc_name = []
+
+    for p in pc_paths:
+        las = laspy.read(Path(f"{pc_folder}/{p}"))
+        if las is None:
+            print(f"Warning: could not read {p}")
+            continue
+        points_tensor = np.vstack((las.x, las.y, las.z)).transpose().astype(np.float32)
+        color_tensor = np.vstack((las.red, las.green, las.blue)).transpose() / 65535.0
+        intensity_tensor = np.vstack((las.intensity)).reshape(-1, 1).astype(np.float32)
+        pc_name.append(p.stem)
+    
+    device = o3d.core.Device("CPU:0")
+    pcd = o3d.t.geometry.PointCloud(device)
+    pcd.point.positions = o3d.core.Tensor(points_tensor, device=device)
+    pcd.point.colors = o3d.core.Tensor(color_tensor,  device=device)
+    pcd.point.intensity = o3d.core.Tensor(intensity_tensor, device=device)
+
+    return pcd, pc_name   
+
+point_cloud, point_cloud_name = load_point_cloud(paths['data'])
+
+#%% Step 3: Transformations and Classification
 def glcs_to_socs(point_cloud):
    
-    pc_glcs = o3d.t.io.read_point_cloud(point_cloud) # tensor point cloud in global coordinates
+    pc_glcs = point_cloud # tensor point cloud in global coordinates
     
-    print(f"Transforming {pc_glcs} from GLCS to SOCS")
+    print(f"Transforming from GLCS to SOCS")
 
 
     # Define each intermediate point cloud
@@ -71,8 +102,8 @@ def glcs_to_socs(point_cloud):
     
     # Define each transformation matrix
     matrices = SimpleNamespace(
-        POP = np.loadtext(paths['pop'], delimiter=','),
-        SOP = np.loadtext(paths['sop'], delimiter=','),
+        POP = np.loadtxt(paths['pop'], delimiter=','),
+        SOP = np.loadtxt(paths['sop'], delimiter=','),
     )
 
     # transform each point into the camera's reference frame
@@ -80,15 +111,13 @@ def glcs_to_socs(point_cloud):
     
     return pc_socs
 
+def classify_point_cloud(point_cloud, images):
+    pc_socs = glcs_to_socs(point_cloud) # read-in the SOCS point cloud
 
-def classify_point_cloud(point_cloud_socs, images, point_cloud_glcs):
+    N = pc_socs.point.positions.shape[0] # number of points
+    device = pc_socs.point.positions.device # is the point cloud on CPU or GPU
 
-    pc = o3d.t.io.read_point_cloud(Path(point_cloud_socs)) # read-in the SOCS point cloud
-
-    N = pc.point.positions.shape[0] # number of points
-    device = pc.point.positions.device # is the point cloud on CPU or GPU
-
-    pc_cmcs = o3d.t.geometry.PointCloud(pc) # clone pc to be transformed later
+    pc_cmcs = o3d.t.geometry.PointCloud(pc_socs) # clone pc to be transformed later
 
     pc_cmcs.point.px_vals = o3d.core.Tensor( 
     # (N x len(images)) tensor storing 1 px val per point per image
@@ -104,6 +133,8 @@ def classify_point_cloud(point_cloud_socs, images, point_cloud_glcs):
         device = device
     )
 
+    masks, mask_paths = load_pngs_from_folder(paths['masks'])
+
     camera_intrinsics = np.loadtxt(Path(paths['intrinsics']), delimiter=',') # the camera intrinsics
 
     # break apart the intrinsics file to build what we need for later
@@ -113,25 +144,21 @@ def classify_point_cloud(point_cloud_socs, images, point_cloud_glcs):
     dy = 0.00000376
     nx = 9504
     ny = 6336
-       
-    '''K = np.array([fx, 0, cx, 0],
-                 [0, fy, cy, 0],
-                 [0, 0, 1, 0])'''
 
-    for j, img in enumerate(images):
+    for j, img in enumerate(masks):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
-        z_rot = np.loadtxt(Path(f"{paths['matrices']}/{images[img]}.dat"), delimiter=',') # the z-rotation matrix for img
-        MM = np.loadtext(Path(f"{paths['matrices']}/mounting.dat") , delimiter=',') # the mounting matrix for img
+        z_rot = np.loadtxt(Path(f"{paths['matrices']}/{mask_paths[j].stem}.dat"), delimiter=',') # the z-rotation matrix for img
+        MM = np.loadtxt(Path(f"{paths['matrices']}/mounting.dat") , delimiter=',') # the mounting matrix for img
 
-        pc_cmcs = o3d.geometry.PointCloud(pc).Transform(inv(z_rot)).Transform(inv(MM)) # Transform the point cloud into the camera's reference frame
+        pc_cmcs = o3d.t.geometry.PointCloud(pc_socs).Transform(inv(z_rot)).Transform(inv(MM)) # Transform the point cloud into the camera's reference frame
 
-        pts = pc_cmcs.points.positions.numpy() # make the point cloud into something through which I can loop.
+        pts = pc_cmcs.point.positions.numpy() # make the point cloud into something through which I can loop.
 
         for i, (x, y, z) in enumerate(pts): # loop through each point 
-            n = ((fx * x) / z) + cx # find the x-pixel the point projects to
-            m = ((fy * y) / z) + cy # find the y-pixel the point projects to
+            n = np.floor((((fx * x) / z) + cx) + 0.5).astype(np.int32) # find the x-pixel the point projects to (assumes all pixel coords are positive)
+            m = np.floor((((fy * y) / z) + cy) + 0.5).astype(np.int32) # find the y-pixel the point projects to (assumes all pixel coords are positive)
 
-            if not np.isnan(img[n,m]): # if there is a pixel value associated with the point
+            if not np.isnan(img[n,m]): # if there is a pixel value associated with the point ***** THIS IS A PROBLEM ******
                 pc_cmcs.point.px_vals[i,j] = img[n,m] # push the pixel value to px_vals for each point
                     
     for p, row in enumerate(pc_cmcs.point.px_vals): # for every point
@@ -151,7 +178,7 @@ def classify_point_cloud(point_cloud_socs, images, point_cloud_glcs):
         device = device
         )
     
-    pc_glcs = point_cloud_glcs
+    pc_glcs = point_cloud
 
     pc_glcs.point.classification = o3d.core.Tensor(
         pc_cmcs.point.classification,
@@ -160,3 +187,41 @@ def classify_point_cloud(point_cloud_socs, images, point_cloud_glcs):
     )
 
     return pc_glcs
+
+#%% Step 4: Write Laz data
+def write_pcd_to_laz(pcd):
+    precision = 0.00025 # 0.00025m for Riegl TLS, UAS, and MLS instruments
+
+    pcd = classify_point_cloud(point_cloud, paths['masks']) # result of classify_point_cloud()
+
+    points = pcd.point.positions.numpy() # point x, y, z values
+    
+    if 'colors' in pcd.point:
+        colors = pcd.point.colors.numpy() * 65535 # point RGB values
+    
+    if 'intensity' in pcd.point:
+        intensity = pcd.point.intensity.numpy # point intensity values
+    
+    if 'classification' in pcd.point:
+        classification = pcd.point.classification.numpy() # point classification values (from classify_point_cloud())
+    
+    header = laspy.LasHeader(point_format=6, version="1.4") # set-up header LAS 1.4 PF:6, change if needed (can make these variables if I want)
+    header.offsets = np.min(points, axis=0) # no idea what this is doing. I'm pretty sure that's just the smallest x value but I'm not sure
+    header.scales = [precision, precision, precision]
+
+    las = laspy.LasData(header)
+
+    las.x = points[:,0]
+    las.y = points[:,1]
+    las.z = points[:,2]
+
+    las.red = colors[:, 0]
+    las.green = colors[:, 1]
+    las.blue = colors[:, 2]
+
+    las.intensity = intensity.flatten().astype(np.uint16)
+
+    las.classification = classification.flatten().astype(np.uint8)
+
+    las.write(f"{paths['out']}/{SCANPOS}_{point_cloud_name}.laz")
+
