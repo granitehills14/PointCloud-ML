@@ -12,10 +12,10 @@ def glcs_to_socs(pc_glcs, POP, SOP):
     print(f"Transforming from GLCS to SOCS")
 
     # Define each intermediate point cloud
-    pc_socs = o3d.t.geometry.PointCloud()
-    
+    pc_socs = o3d.t.geometry.PointCloud(pc_glcs.clone())
+
     # transform each point into the camera's reference frame
-    pc_socs = pc_glcs.Transform(inv(POP)).Transform(inv(SOP)) # glcs > prcs > SOCS
+    pc_socs.Transform(inv(POP)).transform(inv(SOP)) # glcs > prcs > SOCS
     
     return pc_socs
 
@@ -24,7 +24,7 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
     N = pc_socs.point.positions.shape[0] # number of points
     device = pc_socs.point.positions.device # is the point cloud on CPU or GPU
 
-    pc_cmcs = o3d.t.geometry.PointCloud(pc_socs) # clone pc to be transformed later
+    pc_cmcs = o3d.t.geometry.PointCloud(pc_socs.clone()) # clone pc to be transformed later
 
     pc_cmcs.point.px_vals = o3d.core.Tensor( 
     # (N x len(images)) tensor storing 1 px val per point per image
@@ -50,30 +50,39 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
 
     for j, img in enumerate(masks):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
-        z_rot = np.loadtxt(f"{matrices}/{mask_paths[j].stem}.dat", delimiter=',') # the z-rotation matrix for img
-        MM = np.loadtxt(f"{matrices}/mounting.dat" , delimiter=',') # the mounting matrix for img
+        z_rot = np.loadtxt(f"{matrices}/{mask_paths[j].stem}.dat") # the z-rotation matrix for img
+        MM = np.loadtxt(f"{matrices}/mounting.dat" , delimiter='\t') # the mounting matrix for img
 
-        pc_cmcs = o3d.t.geometry.PointCloud(pc_socs).Transform(inv(z_rot)).Transform(inv(MM)) # Transform the point cloud into the camera's reference frame
+        pc_temp = o3d.t.geometry.PointCloud(pc_socs.clone())
+        pc_temp.Transform(inv(z_rot)).transform(inv(MM)) # Transform the point cloud into the camera's reference frame
 
-        pts = pc_cmcs.point.positions.numpy() # make the point cloud into something through which I can loop.
+        pts = pc_temp.point.positions.numpy() # make the point cloud into something through which I can loop.
 
         for i, (x, y, z) in enumerate(pts): # loop through each point 
-            n = np.floor((((fx * x) / z) + cx) + 0.5).astype(np.int32) # find the x-pixel the point projects to (assumes all pixel coords are positive)
-            m = np.floor((((fy * y) / z) + cy) + 0.5).astype(np.int32) # find the y-pixel the point projects to (assumes all pixel coords are positive)
+            if pc_temp.point.positions[i,2].item() > 0: # the point must be in front of the camera
+                if pc_temp.point.return_number[i].item() == 1: # the point must not be occluded by anything. Here, we're defining that to mean is a first or single return
+                    n = np.floor((((fx * x) / z) + cx) + 0.5).astype(np.int32) # find the x-pixel the point projects to (assumes all pixel coords are positive)
+                    m = np.floor((((fy * y) / z) + cy) + 0.5).astype(np.int32) # find the y-pixel the point projects to (assumes all pixel coords are positive)
 
-            if not np.isnan(img[n,m]): # if there is a pixel value associated with the point ***** THIS IS A PROBLEM ******
-                pc_cmcs.point.px_vals[i,j] = img[n,m] # push the pixel value to px_vals for each point
+                    if 0 <= n < nx and 0 <= m < ny: # phi(pi(p_i)) must produce valid indices
+                        pc_cmcs.point.px_vals[i,j] = img[m,n]
+                    else: pc_cmcs.point.px_vals[i,j] = 255
+                else: pc_cmcs.point.px_vals[i,j] = 255
+            else: pc_cmcs.point.px_vals[i,j] = 255
                     
     for p, row in enumerate(pc_cmcs.point.px_vals): # for every point
         for c in range(num_classes): # and for each class
             pc_cmcs.point.class_votes[p,c] = np.count_nonzero(row == c) # set the value of class_votes[p,c] to the number of occurances of that class
 
-    for p, row in enumerate(pc_cmcs.point.class_votes): # for each point
-        pc_cmcs.point.classification[p] = pc_cmcs.point.class_votes[p,np.int32(np.argmax(row))] # set the classification value to the value of the column index with the most votes. In the case where there is a tie the smaller index gets chosen by this. I had an idea of using kNN as a tie-breaker but that might be too complex for now. 
-
     votes = np.asarray(pc_cmcs.point.class_votes)
-    labels = votes.argmax(axis=1).astype(np.int32)
-    
+    labels = np.full((pc_cmcs.point.positions.shape[0],), 255)
+
+    for i in range(len(votes)):
+        if np.count_nonzero(votes[i]) > 0:
+            labels[i] = votes[i].argmax().astype(np.int32) # set the classification value to the value of the column index with the most votes. In the case where there is a tie the smaller index gets chosen by this. I had an idea of using kNN as a tie-breaker but that might be too complex for now. 
+        else:
+            labels[i] = 255
+
     pc_cmcs.point.classification = o3d.core.Tensor(
         # (N, ) tensor storing the derived classification value for each point
         labels,

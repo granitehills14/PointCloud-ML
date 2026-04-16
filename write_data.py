@@ -12,7 +12,7 @@ def write_pcd_to_laz(pcd, out_path, scanpos_name, point_cloud_name):
         colors = pcd.point.colors.numpy() * 65535 # point RGB values
     
     if 'intensity' in pcd.point:
-        intensity = pcd.point.intensity.numpy # point intensity values
+        intensity = pcd.point.intensity.numpy() # point intensity values
     
     if 'classification' in pcd.point:
         classification = pcd.point.classification.numpy() # point classification values (from classify_point_cloud())
