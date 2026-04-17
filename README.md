@@ -39,7 +39,16 @@ Returns:
 Inputs:
 - `pc_folder` : Path to the folder containing the laz point cloud
 
-Behavior: 
+Behavior:
+- As I see it there are 5 "reasonable" scenarios for loading a PC:
+    1. las contains [x, y, z] ---> rare but possible
+    2. las contains [x, y, z, I] ---> common (I: Intensity)
+    3. las contains [x, y, x, R, G, B] ---> common for SFM point clouds 
+    4. las contains [x, y, z, I, N] ---> common for a multiple return lidar that lacks a camera (N: Return Number)
+    5. las contains [x, y, z, I, R, G, B, N] ---> common for a multiple return lidar with a camera
+
+- I think for now I will only accept scenarios 4 and 5 here, since we require N for occlusion handling and we, in theory, can generate panorama images from the lidar that can be segmented via SAM, so a camera isn't strictly necessary. 
+
 - Read-in the laz point cloud and it's attributes
 - Populates arrays with the point cloud attrributes:
     - `points_tensor` : the x, y, and z values for each point
