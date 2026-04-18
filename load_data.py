@@ -2,10 +2,10 @@ import numpy as np
 import laspy
 import open3d as o3d
 import cv2
-import warnings
 from pathlib import Path
 
 def load_pngs_from_folder(mask_folder):
+    print("Loading image masks...")
     image_paths = sorted([
         p for p in Path(mask_folder).iterdir()
         if p.suffix.lower() == ".png" and not p.stem.endswith("_color")
@@ -25,6 +25,7 @@ def load_pngs_from_folder(mask_folder):
 
 
 def load_matrices(pop_path, sop_path, camera_intrinsics ):
+    print("Loading POP and SOP matrices...")
     POP = np.loadtxt(pop_path)
     SOP = np.loadtxt(sop_path)
     intrinsics = np.loadtxt(camera_intrinsics, delimiter=",")
@@ -62,6 +63,7 @@ def load_point_cloud(pc_folder):
             raise SystemExit("ERROR!!! Point Cloud does not contain Return Number. Exiting.")
         
         if has_rgb:
+            print(f"Loading {p} with RGB...")
             points_tensor = np.vstack((las.x, las.y, las.z)).transpose().astype(np.float32)
             color_tensor = np.vstack((las.red, las.green, las.blue)).transpose().astype(np.float32) / 65535.0
             intensity_tensor = np.vstack((las.intensity)).reshape(-1, 1).astype(np.float32)
@@ -75,7 +77,7 @@ def load_point_cloud(pc_folder):
             pcd.point.intensity = o3d.core.Tensor(intensity_tensor, device=device)
             pcd.point.return_number = o3d.core.Tensor(return_number, device=device)
         else: # warning: will only load xyz, I, N 
-            warnings.warn("Warning: Point Cloud does not contain RGB. Loading as X, Y, Z, I, N")
+            print("Warning: Point Cloud does not contain RGB. Loading as X, Y, Z, I, N")
             
             points_tensor = np.vstack((las.x, las.y, las.z)).transpose().astype(np.float32)
             intensity_tensor = np.vstack((las.intensity)).reshape(-1, 1).astype(np.float32)

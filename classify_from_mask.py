@@ -1,12 +1,5 @@
 if __name__ == "__main__":
     import os
-    import numpy as np
-    import laspy
-    from numpy.linalg import inv
-    import open3d as o3d
-    from types import SimpleNamespace
-    import cv2
-    from pathlib import Path
 
     from load_data import load_pngs_from_folder, load_matrices, load_point_cloud
     from write_data import write_pcd_to_laz
@@ -40,7 +33,7 @@ if __name__ == "__main__":
     #%% Step 3: Transfer classification from masks to point cloud
     pc_socs = glcs_to_socs(pc_glcs, POP, SOP)
 
-    pc_glcs_classified = classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_classes, paths['matrices'] )
+    pc_glcs_classified = classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_classes, paths['matrices'])
 
     #%% Step  4: Write classified point cloud to disk
     write_pcd_to_laz(pc_glcs_classified, paths['out'], SCANPOS, pc_name)
