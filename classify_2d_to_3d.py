@@ -2,6 +2,7 @@
 import numpy as np
 from numpy.linalg import inv
 import open3d as o3d
+import cv2
 
 def glcs_to_socs(pc_glcs, POP, SOP):
        
@@ -33,14 +34,19 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]
     cx, cy = intrinsics[0, 2], intrinsics[1, 2]
 
+    
+
     MM = np.loadtxt(f"{matrices}/mounting.dat" , delimiter='\t') # the mounting matrix for the camera
 
     for j, img in enumerate(masks):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
         print(f"Applying masks from {mask_paths[j].stem}")
         z_rot = np.loadtxt(f"{matrices}/{mask_paths[j].stem.removesuffix('_mask')}.dat") # the z-rotation matrix for img
-
-        h, w = img.shape[:2]
+        
+        if img.shape[0] > img.shape[1]: # check that the image is landscape
+            img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE) # rotate the image
+        
+        h, w = img.shape[:2] # assign h and w from img dimensions
 
         pc_temp = o3d.t.geometry.PointCloud(pc_socs.clone())
         pc_temp.transform(inv(z_rot)).transform(inv(MM)) # Transform the point cloud into the camera's reference frame
