@@ -1,5 +1,7 @@
 import numpy as np
 import laspy
+import cv2
+from pathlib import Path
 
 def write_pcd_to_laz(pcd, out_path, scanpos_name, point_cloud_name):
     precision = 0.00025 # 0.00025m for Riegl TLS, UAS, and MLS instruments
@@ -13,7 +15,6 @@ def write_pcd_to_laz(pcd, out_path, scanpos_name, point_cloud_name):
 
     if has_rgb:
         PF = 7
-    else: 
         PF = 6
     
     header = laspy.LasHeader(point_format=PF, version="1.4") # set-up header LAS 1.4 PF:7 if we have rgb, 6 otherwise.
@@ -46,3 +47,29 @@ def write_pcd_to_laz(pcd, out_path, scanpos_name, point_cloud_name):
         
     las.write(f"{out_path}/{scanpos_name}_{point_cloud_name}.laz")
     print(f"Writing {scanpos_name}_{point_cloud_name}.laz to {out_path}")
+
+
+def write_mask(mask, name, output_path):
+    '''
+    Writes the combined mask to the disk. 
+    '''
+
+    out_path = Path(f"{output_path}/MASKS/")
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_file = Path(f"{out_path}/{name.stem}_mask.png")
+                    
+    cv2.imwrite(str(out_file), mask)
+    print(f"Saved {out_file}")
+
+
+def write_confidence(confidence, name, output_path):
+    '''
+    Writes the combined confidence to the disk. 
+    '''
+
+    out_path = Path(f"{output_path}/MASKS/")
+    out_path.mkdir(parents=True, exist_ok=True)
+    out_file = Path(f"{out_path}/{name.stem}_confidence.png")
+                    
+    cv2.imwrite(str(out_file), confidence)
+    print(f"Saved {out_file}")

@@ -7,26 +7,19 @@ Scaffold for generating masks for a folder of images given text prompts.
 from PIL import Image
 import requests
 from io import BytesIO
-import sam3
-from sam3.model_builder import build_sam3_image_model
-# from sam3.model.sam3_image_processor import Sam3Processor
-from sam3.train.data.collator import collate_fn_api as collate
-from sam3.model.utils.misc import copy_data_to_device
-import os
-sam3_root = os.path.join(os.path.dirname(sam3.__file__), "..")
 import torch
 import sys
-sys.path.append(f"{sam3_root}/examples")
-from sam3.visualization_utils import plot_results
-from sam3.train.data.sam3_image_dataset import InferenceMetadata, FindQueryLoaded, Image as SAMImage, Datapoint
+import os
+import numpy as np
 from typing import List
-from sam3 import build_sam3_image_model
 from transformers import Sam3Processor, Sam3Model
 import load_data as ld
 import write_data as wd
 
 # Choose device: CUDA (NVIDIA GPU), CPU (all others)
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Define paths and parameters
 config_path = "./"
 config_json = "config.json"
 settings, sam3, num_classes = ld.load_config(config_path, config_json)
@@ -49,65 +42,112 @@ paths = {
     'sop' : f"{scanpos_dir}/{SCANPOS}.dat"
 }
 
+def to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return x
+
+
 # Initialize SAM
-bpe_path = f"{sam3_root}/assets/bpe_sample_vocab_16e6.txt.gz"
-model = Sam3Model.from_pretrained(MODEL)
-processor = Sam3Processor(MODEL)
+model = Sam3Model.from_pretrained(MODEL).to(device)
+processor = Sam3Processor.from_pretrained(MODEL)
 
-images, valid_paths = ld.load_raw_images(paths['raw'])
+images, valid_paths = ld.load_raw_imagery(paths['raw'])
+text_prompts = sam3["prompts"]
 
 '''
-for every image in images:
-    for every text query:
-        run inference using SAM
-        make the boolean mask into a real semantic mask
-'''
+For every image in the image folder:
+    Create empty mask array
+    Create empty confidence array
+    Pre-compute image embeddings
 
-for image in images: # this code is pretty trash
-    counter = 0
-    for i in range(num_classes):
+    For every prompt in prompts:
+        Create a class_id
+        Set the prompt
+        Run SAM3
+        Post-process the SAM3 outputs
+            Determine if there are cells to change
+            Determine which cells need updating
+            Update the cells
+            Update the confidence
     
-        inputs = processor(
-            images=datapoints[i].images[i],
-            text=datapoints[i].find_queries[i].astype('str')
-        )
+    Write the mask and confidence to disk as PNG
 
+'''
+for image, image_path in zip(images, valid_paths):
+    combined_mask = np.zeros((image.shape[:2])) # create empty mask array
+    mask_confidence = np.zeros((image.shape[:2])) # create empty mask confidence array
+    
+    # Pre-compute image embeddings (per HF Transformers Docs)
+    img_inputs = processor(
+        images=image,
+        return_tensors="pt"
+        ).to(device)
+    
+    with torch.no_grad():
+        vision_embeds = model.get_vision_features(
+            pixel_values=img_inputs.pixel_values
+            )
+
+    for prompt in text_prompts:
+        class_id = text_prompts.index(prompt) + 1 # create class id
+
+       # set text prompt 
+        text_inputs = processor(
+            text=prompt,
+            return_tensors="pt"
+        ).to(device)
+
+        # run SAM3
         with torch.no_grad():
-            outputs = model(**inputs)
-
+            outputs = model(
+                vision_embeds=vision_embeds, 
+                **text_inputs
+                )
+        
+        # Post-process results
         results = processor.post_process_instance_segmentation(
             outputs,
             threshold=0.5,
             mask_threshold=0.5,
-            target_sizes=inputs.get("original_sizes").tolist()
+            target_sizes=img_inputs.get("original_sizes").tolist()
+        )[0]
+
+        masks = to_numpy(results["masks"])
+        
+        if len(masks) == 0:
+            continue
+
+        confidence = to_numpy(results["scores"])
+
+        masks_bool = masks.astype(bool)
+
+        confidence_per_mask = confidence[:, None, None]
+
+        combined_confidence = np.where(
+            masks_bool,
+            confidence_per_mask,
+            0
         )
+
+        prompt_confidence = combined_confidence.max(axis=0)
+
+
+        # assess only the mask for this prompt
+        prompt_mask = masks.any(axis=0)
+
+        # is there a mask value?
+        candidate_exists = (prompt_mask == 1) 
         
-        if output["masks"].shape[0] > 0:
-            prompt_mask = outputs["masks"][:,0]
-            combined_masks[prompt_mask.cpu().numpy()] = counter
-        
-        counter += 1
+        # which pixels should be updated?
+        update_pixels = candidate_exists & (prompt_confidence > mask_confidence)
 
-'''
-    for every mask image from the previous loop:
-        if cell is not empty:
-            what is the cell value?
-            what mask does that map to?
-            if confidence of existing value > confidence of new value:
-                do nothing
-            else:
-                combined_mask_cell = mask_cell
-'''
+        # update the combined mask array
+        combined_mask[update_pixels] = class_id
 
-    wd.write_mask_to_disk(combined_mask)
+        # update the combined confidence array
+        mask_confidence[update_pixels] = prompt_confidence[update_pixels]
 
-
-
-
-
-'''fig = plt.figure(figsize=(np.shape(image_rgb)[1]/72, np.shape(image_rgb)[0]/72))
-fig.add_axes([0,0,1,1])
-plt.imshow(image_rgb)
-color_mask = sam_masks(result)
-plt.axes('off')
-plt.savefig("../test_result.jpeg")'''
+    # write the mask and confidence to disk
+    wd.write_mask(combined_mask, image_path, paths['out'])
+    wd.write_confidence(mask_confidence, image_path, paths['out'])
