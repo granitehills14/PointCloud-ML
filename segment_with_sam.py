@@ -20,16 +20,28 @@ import write_data as wd
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Define paths and parameters
-config_path = "./"
-config_json = "config.json"
-settings, sam3, num_classes = ld.load_config(config_path, config_json)
-MODEL = sam3["model"]
-prompts = sam3["prompts"]
+if device == 'cuda':
+    config_path = "./pcml/code/"
+    config_json = "config.json"
+    settings, sam3, num_classes = ld.load_config(config_path, config_json)
+    MODEL = sam3["model"]
+    prompts = sam3["prompts"]
 
-SCENE = settings["SCENE"]
-SCANPOS = settings["SCANPOS"]
-project_dir = f"./{SCENE}"
-scanpos_dir = f"./{SCENE}/{SCANPOS}"
+    SCENE = settings["SCENE"]
+    SCANPOS = settings["SCANPOS"]
+    project_dir = f"./pcml/data/riegl/{SCENE}"
+    scanpos_dir = f"./pcml/data/riegl/{SCENE}/{SCANPOS}"
+else: 
+    config_path = "./"
+    config_json = "config.json"
+    settings, sam3, num_classes = ld.load_config(config_path, config_json)
+    MODEL = sam3["model"]
+    prompts = sam3["prompts"]
+
+    SCENE = settings["SCENE"]
+    SCANPOS = settings["SCANPOS"]
+    project_dir = f"./{SCENE}"
+    scanpos_dir = f"./{SCENE}/{SCANPOS}"
 
 paths = {
     'data' : os.path.join(scanpos_dir, "DATA"),
@@ -75,6 +87,7 @@ For every image in the image folder:
 
 '''
 for image, image_path in zip(images, valid_paths):
+    print(f"Performing inference on {image_path}")
     combined_mask = np.zeros((image.shape[:2])) # create empty mask array
     mask_confidence = np.zeros((image.shape[:2])) # create empty mask confidence array
     
@@ -90,6 +103,7 @@ for image, image_path in zip(images, valid_paths):
             )
 
     for prompt in text_prompts:
+        print(f"Computing masks for {prompt}")
         class_id = text_prompts.index(prompt) + 1 # create class id
 
        # set text prompt 
