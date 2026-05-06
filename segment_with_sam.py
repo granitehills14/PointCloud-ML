@@ -3,15 +3,9 @@ segment_with_sam.py
 
 Scaffold for generating masks for a folder of images given text prompts.
 '''
-
-from PIL import Image
-import requests
-from io import BytesIO
 import torch
-import sys
 import os
 import numpy as np
-from typing import List
 from transformers import Sam3Processor, Sam3Model
 import load_data as ld
 import write_data as wd
@@ -26,6 +20,7 @@ if device == 'cuda':
     settings, sam3, num_classes = ld.load_config(config_path, config_json)
     MODEL = sam3["model"]
     prompts = sam3["prompts"]
+    color = settings["color_masks"]
 
     SCENE = settings["SCENE"]
     SCANPOS = settings["SCANPOS"]
@@ -37,6 +32,7 @@ else:
     settings, sam3, num_classes = ld.load_config(config_path, config_json)
     MODEL = sam3["model"]
     prompts = sam3["prompts"]
+    color = settings["color_masks"]
 
     SCENE = settings["SCENE"]
     SCANPOS = settings["SCANPOS"]
@@ -59,13 +55,15 @@ def to_numpy(x):
         return x.detach().cpu().numpy()
     return x
 
+# If wanting colored masks, define color palette 
+palette = wd.define_palette(num_classes) if color else None
 
 # Initialize SAM
 model = Sam3Model.from_pretrained(MODEL).to(device)
 processor = Sam3Processor.from_pretrained(MODEL)
 
 images, valid_paths = ld.load_raw_imagery(paths['raw'])
-text_prompts = sam3["prompts"]
+
 
 '''
 For every image in the image folder:
@@ -88,8 +86,8 @@ For every image in the image folder:
 '''
 for image, image_path in zip(images, valid_paths):
     print(f"Performing inference on {image_path}")
-    combined_mask = np.zeros((image.shape[:2])) # create empty mask array
-    mask_confidence = np.zeros((image.shape[:2])) # create empty mask confidence array
+    combined_mask = np.zeros((image.shape[:2]), dtype=np.uint8) # create empty mask array
+    mask_confidence = np.zeros((image.shape[:2]), dtype=np.float32) # create empty mask confidence array
     
     # Pre-compute image embeddings (per HF Transformers Docs)
     img_inputs = processor(
@@ -102,9 +100,8 @@ for image, image_path in zip(images, valid_paths):
             pixel_values=img_inputs.pixel_values
             )
 
-    for prompt in text_prompts:
+    for class_id, prompt in enumerate(prompts, start=1):
         print(f"Computing masks for {prompt}")
-        class_id = text_prompts.index(prompt) + 1 # create class id
 
        # set text prompt 
         text_inputs = processor(
@@ -146,12 +143,8 @@ for image, image_path in zip(images, valid_paths):
 
         prompt_confidence = combined_confidence.max(axis=0)
 
-
-        # assess only the mask for this prompt
-        prompt_mask = masks.any(axis=0)
-
         # is there a mask value?
-        candidate_exists = (prompt_mask == 1) 
+        candidate_exists = masks_bool.any(axis=0) 
         
         # which pixels should be updated?
         update_pixels = candidate_exists & (prompt_confidence > mask_confidence)
@@ -163,5 +156,5 @@ for image, image_path in zip(images, valid_paths):
         mask_confidence[update_pixels] = prompt_confidence[update_pixels]
 
     # write the mask and confidence to disk
-    wd.write_mask(combined_mask, image_path, paths['out'])
+    wd.write_mask(combined_mask, image_path, paths['out'], color, palette)
     wd.write_confidence(mask_confidence, image_path, paths['out'])

@@ -3,7 +3,8 @@
         "SCENE" : "Basement",
         "SCANPOS" : "ScanPos001",
         "USING_SAM" : true,
-        "num_classes" : 7
+        "num_classes" : 7,
+        "color_masks" : true
     },
     "sam3" : {
         "prompts" : [
