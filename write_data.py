@@ -75,7 +75,7 @@ def write_mask(mask, name, output_path, color, palette):
     Writes the combined mask to the disk. 
     '''
 
-    out_path = Path(f"{output_path}/MASKS/")
+    out_path = Path(f"{output_path}/")
     out_path.mkdir(parents=True, exist_ok=True)
     out_file = Path(f"{out_path}/{name.stem}_mask.png")
                     
@@ -83,7 +83,7 @@ def write_mask(mask, name, output_path, color, palette):
     print(f"Saved {out_file}")
 
     if color:
-        color_path = Path(f"{output_path}/MASKS/COLOR/")
+        color_path = Path(f"{output_path}/COLOR/")
         color_path.mkdir(parents=True, exist_ok=True)
         colored_mask = palette[mask]
         colored_file = Path(f"{color_path}/{name.stem}_mask_colored.png")
@@ -95,7 +95,7 @@ def write_confidence(confidence, name, output_path):
     Writes the combined confidence to the disk. 
     '''
 
-    out_path = Path(f"{output_path}/MASKS/")
+    out_path = Path(f"{output_path}/CONFIDENCE/")
     out_path.mkdir(parents=True, exist_ok=True)
     out_file = Path(f"{out_path}/{name.stem}_confidence.png")
                     

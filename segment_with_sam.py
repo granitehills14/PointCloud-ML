@@ -156,5 +156,5 @@ for image, image_path in zip(images, valid_paths):
         mask_confidence[update_pixels] = prompt_confidence[update_pixels]
 
     # write the mask and confidence to disk
-    wd.write_mask(combined_mask, image_path, paths['out'], color, palette)
+    wd.write_mask(combined_mask, image_path, paths['masks'], color, palette)
     wd.write_confidence(mask_confidence, image_path, paths['out'])
