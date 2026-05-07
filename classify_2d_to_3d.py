@@ -22,21 +22,15 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
     device = pc_socs.point.positions.device # is the point cloud on CPU or GPU
 
     pc_cmcs = o3d.t.geometry.PointCloud(pc_socs.clone()) # clone pc to be transformed later
-
-    pc_cmcs.point.px_vals = o3d.core.Tensor( 
-    # (N x len(images)) tensor storing 1 px val per point per image
-        np.full((N, len(mask_paths)), -1, dtype=np.int32),
-        dtype = o3d.core.int32,
-        device = device
-    )
     
     # break apart the intrinsics file to build what we need for later
     fx, fy = intrinsics[0, 0], intrinsics[1, 1]
-    cx, cy = intrinsics[0, 2], intrinsics[1, 2]
-
-    
+    cx, cy = intrinsics[0, 2], intrinsics[1, 2]  
 
     MM = np.loadtxt(f"{matrices}/mounting.dat" , delimiter='\t') # the mounting matrix for the camera
+    inv_MM = inv(MM)
+
+    px_vals = np.full((N, len(mask_paths)), 255, dtype=np.int32)
 
     for j, img in enumerate(masks):
         # for each image, transform pc into the camera's frame of reference, then project the points onto the image
@@ -49,41 +43,47 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
         h, w = img.shape[:2] # assign h and w from img dimensions
 
         pc_temp = o3d.t.geometry.PointCloud(pc_socs.clone())
-        pc_temp.transform(inv(z_rot)).transform(inv(MM)) # Transform the point cloud into the camera's reference frame
+        pc_temp.transform(inv(z_rot)).transform(inv_MM) # Transform the point cloud into the camera's reference frame
 
         pts = pc_temp.point.positions.numpy() # make the point cloud into something through which I can loop.
 
-        for i, (x, y, z) in enumerate(pts): # loop through each point 
-            if not (np.isfinite(x) and np.isfinite(y) and np.isfinite(z)): # x, y, and z must be finite
-                pc_cmcs.point.px_vals[i,j] = 255
-                continue
+        x = pts[:,0]
+        y = pts[:,1]
+        z = pts[:,2]
 
-            if z <= 0: # the point must be in front of the camera
-                pc_cmcs.point.px_vals[i,j] = 255
-                continue
+        return_numbers = pc_temp.point.return_number.numpy().reshape(-1)
 
-            if int(pc_temp.point.return_number[i].item()) != 1: # the point must be a single or first return. The is a proxy for occlusion.
-                pc_cmcs.point.px_vals[i,j] = 255
-                continue
+        finite_xyz = np.isfinite(pts).all(axis=1)
+        camera_front = (z > 0)
+        first_single_returns = (return_numbers == 1)
+        valid_3d = finite_xyz & camera_front & first_single_returns
 
-            # calculate c_i = pi(p_i)
-            u = ((fx *x) / z) + cx
-            v = ((fy *y) / z) + cy
+        idx = np.where(valid_3d)[0]
 
-            if not (np.isfinite(u) and np.isfinite(v)): # u and v must be finite
-                pc_cmcs.point.px_vals[i,j] = 255
-                continue
+        valid_x = x[idx]
+        valid_y = y[idx]
+        valid_z = z[idx]
 
-            # calculate k_i = phi(c_i)
-            n = int(np.floor(u + 0.5))
-            m = int(np.floor(v + 0.5))
+        u = ((fx * valid_x) / valid_z) + cx
+        v = ((fy * valid_y) / valid_z) + cy
 
-            if 0 <= n < w and 0 <= m < h: # the point must project to the sensor
-                pc_cmcs.point.px_vals[i,j] = int(img[m,n])
-            else:
-                pc_cmcs.point.px_vals[i,j] = 255
-                        
-    px_vals = pc_cmcs.point.px_vals.numpy() # (N, len(mask_paths)) make the tensor a Numpy array
+        finite_uv = np.isfinite(u) & np.isfinite(v)
+
+        idx = idx[finite_uv]
+        
+        n = np.floor(u[finite_uv] + 0.5).astype(np.int32)
+        m = np.floor(v[finite_uv] + 0.5).astype(np.int32)
+
+        frustum = (0 <= n) & (n < w) & (0 <= m) & (m < h)
+
+        valid_point_indices = idx[frustum]
+
+        sampled_values = img[m[frustum], n[frustum]]
+
+        px_vals[valid_point_indices, j] = sampled_values
+    
+    pc_cmcs.point.px_vals = o3d.core.Tensor(px_vals, dtype=o3d.core.int32, device=device)
+
     class_votes = np.zeros((N, num_classes), dtype=np.int32) # make a (N, num_classes) Numpy array to hold the class_votes
 
     for c in range(num_classes):
