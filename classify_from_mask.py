@@ -1,16 +1,22 @@
 if __name__ == "__main__":
     import os
 
-    from load_data import load_pngs_from_folder, load_matrices, load_point_cloud
+    from load_data import load_config, load_pngs_from_folder, load_matrices, load_point_cloud
     from write_data import write_pcd_to_laz
     from classify_2d_to_3d import glcs_to_socs, classify_point_cloud
 
     #%% Step 1: Establish Script-Wide Variables and Paths
-    num_classes = 5
-    SCENE = "Basement"
-    SCANPOS = "ScanPos001"
-    project_dir = f"pcml/data/riegl/{SCENE}"
-    scanpos_dir = f"pcml/data/riegl/{SCENE}/{SCANPOS}"
+    config_path = "./pcml/code/"
+    config_json = "config.json"
+    settings, sam3, num_classes = load_config(config_path, config_json)
+    MODEL = sam3["model"]
+    prompts = sam3["prompts"]
+    color = settings["color_masks"]
+
+    SCENE = settings["SCENE"]
+    SCANPOS = settings["SCANPOS"]
+    project_dir = f"./pcml/data/riegl/{SCENE}"
+    scanpos_dir = f"./pcml/data/riegl/{SCENE}/{SCANPOS}"
 
     paths = {
         'data' : os.path.join(scanpos_dir, "DATA"),
