@@ -1,8 +1,76 @@
+'''
+Data loading script
+Development version for implementing SAM3
+
+Branched from Main: 21 April 2026
+'''
+import json
 import numpy as np
 import laspy
 import open3d as o3d
 import cv2
 from pathlib import Path
+
+def load_config(config_path, config_json):
+    '''
+    Load the config JSON
+        settings  
+            Project Name
+            ScanPos
+            Number of Classes
+        sam3
+            Key words for the text prompts
+    '''
+    print("Loading config file...")
+    config_file = Path(config_path) / config_json
+
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+
+    if config is None:
+        raise SystemExit("FATAL ERROR! NO CONFIG FILE FOUND. EXITING.")
+
+    settings = config["settings"]
+    sam3 = config["sam3"]
+    
+    if settings["USING_SAM"]:
+        num_classes = len(sam3["prompts"])
+    else: 
+        num_classes = settings["num_classes"]
+    
+    return settings, sam3, num_classes 
+
+
+def load_raw_imagery(jpeg_folder):
+    '''
+    Load raw images from folder
+    Store all raw images as a numpy array in a list. Track valid image names and paths via valid_paths.
+    '''
+    print("Loading raw imagery...")
+    image_paths = sorted([
+        p for p in Path(jpeg_folder).iterdir()
+        if p.suffix.lower() in {".jpg", ".jpeg"}
+        ])
+
+    images = []
+    valid_paths = []
+
+    if len(image_paths) == 0:
+        raise SystemExit("FATAL ERROR! NO IMAGES FOUND! EXITING")
+    
+    for p in image_paths:
+        img_bgr = cv2.imread(str(p))
+        if img_bgr is None:
+            print(f"Warning: could not read {p}")
+            continue
+
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+        images.append(img)
+        valid_paths.append(p)
+    
+    return images, valid_paths
+
 
 def load_pngs_from_folder(mask_folder):
     print("Loading image masks...")
@@ -49,7 +117,7 @@ def load_point_cloud(pc_folder):
     
     pc_paths = sorted([
         p for p in Path(pc_folder).iterdir()
-        if p.suffix.lower() == ".laz" or p.suffix.lower() == ".las"
+        if p.suffix.lower() in {".laz", ".las"}
     ])
 
     if len(pc_paths) == 1:
