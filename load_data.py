@@ -11,6 +11,13 @@ import open3d as o3d
 import cv2
 from pathlib import Path
 
+def set_up_scanpos_folders(project_path):
+    scanpos_folders = sorted([
+        f for f in Path(project_path).iterdir()
+        if f.is_dir() and f.name.startswith("ScanPos")
+        ])
+    return scanpos_folders
+
 def load_config(config_path, config_json):
     '''
     Load the config JSON

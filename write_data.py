@@ -90,12 +90,12 @@ def write_mask(mask, name, output_path, color, palette):
         cv2.imwrite(str(colored_file), colored_mask[:,:,::-1])
         print(f"Saved {colored_file}")
 
-def write_confidence(confidence, name, output_path):
+def write_confidence(confidence, name, scanpos, output_path):
     '''
     Writes the combined confidence to the disk. 
     '''
 
-    out_path = Path(f"{output_path}/CONFIDENCE/")
+    out_path = Path(f"{output_path}/{scanpos}/CONFIDENCE/")
     out_path.mkdir(parents=True, exist_ok=True)
     out_file = Path(f"{out_path}/{name.stem}_confidence.png")
                     

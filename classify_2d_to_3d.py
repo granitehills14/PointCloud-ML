@@ -84,9 +84,9 @@ def classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_cl
     
     pc_cmcs.point.px_vals = o3d.core.Tensor(px_vals, dtype=o3d.core.int32, device=device)
 
-    class_votes = np.zeros((N, num_classes), dtype=np.int32) # make a (N, num_classes) Numpy array to hold the class_votes
+    class_votes = np.zeros((N, num_classes + 1), dtype=np.int32) # make a (N, num_classes) Numpy array to hold the class_votes
 
-    for c in range(num_classes):
+    for c in range(num_classes + 1):
         class_votes[:,c] = np.count_nonzero(px_vals == c, axis=1) # count how many of each class exist in px_vals
     
     labels = np.full(N, 255, dtype=np.int32) # create the labels Numpy array to take the values from the voting routine, default value is 255 ("no data")

@@ -151,7 +151,7 @@ if __name__ == "__main__":
 
         # write the mask and confidence to disk
         wd.write_mask(combined_mask, image_path, paths['masks'], color, palette)
-        wd.write_confidence(mask_confidence, image_path, paths['out'])
+        wd.write_confidence(mask_confidence, image_path, SCANPOS, paths['out'])
 
     #%% Step 3: Perform Point Projection and Segmentation Transfer
     # Load matrices
