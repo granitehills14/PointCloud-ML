@@ -39,13 +39,14 @@ def load_config(config_path, config_json):
 
     settings = config["settings"]
     sam3 = config["sam3"]
+    neighborhood = config["neighborhood"]
     
     if settings["USING_SAM"]:
         num_classes = len(sam3["prompts"])
     else: 
         num_classes = settings["num_classes"]
     
-    return settings, sam3, num_classes 
+    return settings, sam3, neighborhood, num_classes 
 
 
 def load_raw_imagery(jpeg_folder):

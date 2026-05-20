@@ -65,9 +65,11 @@ def write_pcd_to_laz(pcd, out_path, scanpos_name, point_cloud_name):
     if has_return_number:
         Return_Number = pcd.point.return_number.numpy()
         las.return_number = Return_Number.flatten().astype(np.uint8)
-        
-    las.write(f"{out_path}/{scanpos_name}_{point_cloud_name}.laz")
-    print(f"Writing {scanpos_name}_{point_cloud_name}.laz to {out_path}")
+
+    write_path = Path(f"{out_path}/{scanpos_name}/")
+    write_path.mkdir(parents=True, exist_ok=True)    
+    las.write(f"{write_path}/{scanpos_name}_{point_cloud_name}.laz")
+    print(f"Writing {scanpos_name}_{point_cloud_name}.laz to {write_path}")
 
 
 def write_mask(mask, name, output_path, color, palette):

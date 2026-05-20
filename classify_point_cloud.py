@@ -14,11 +14,12 @@ if __name__ == "__main__":
     import load_data as ld
     import write_data as wd
     from classify_2d_to_3d import glcs_to_socs, classify_point_cloud
+    import knn as knn
 
     #%% Step 1: Establish Script-Wide Variables and Paths
     config_path = "./pcml/code/"
     config_json = "config.json"
-    settings, sam3, num_classes = ld.load_config(config_path, config_json)
+    settings, sam3, neighborhood, num_classes = ld.load_config(config_path, config_json)
     MODEL = sam3["model"]
     prompts = sam3["prompts"]
     color = settings["color_masks"]
@@ -168,5 +169,8 @@ if __name__ == "__main__":
     pc_socs = glcs_to_socs(pc_glcs, POP, SOP)
     pc_glcs_classified = classify_point_cloud(pc_socs, pc_glcs, masks, mask_paths, intrinsics, num_classes, paths['matrices'])
 
+    # Extrapolate classification values into unclassified regions
+    pc_glcs_filled = knn.extrapolate_classification(pc_glcs_classified, neighborhood)
+
     # Write classified point cloud to disk
-    wd.write_pcd_to_laz(pc_glcs_classified, paths['out'], SCANPOS, pc_name)
+    wd.write_pcd_to_laz(pc_glcs_filled, paths['out'], SCANPOS, pc_name)
