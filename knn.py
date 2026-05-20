@@ -1,5 +1,6 @@
 from scipy.spatial import cKDTree
 import numpy as np
+import open3d as o3d
 
 def majority_vote(neighbor_labels):
     return np.array([
@@ -7,17 +8,47 @@ def majority_vote(neighbor_labels):
         for row in neighbor_labels
     ])
 
+
 def extrapolate_classification(pc_glcs_classified, neighborhood):
-    k = neighborhood["k"]
+    input_k = neighborhood["k"]
     unclassified_labels = neighborhood["unclassified_labels"]
     
-    labels = pc_glcs_classified[:,3]
+    labels = pc_glcs_classified.point.classification.cpu().numpy().reshape(-1)
+    labels = labels.astype(np.int32, copy=False)
 
-    target_mask = np.isin(labels, neighborhood["unclassified_labels"])
+    target_mask = np.isin(labels, unclassified_labels)
     candidate_mask = ~target_mask
+
+    if not np.any(target_mask):
+        return pc_glcs_classified.clone()
+
+    if not np.any(candidate_mask):
+        raise SystemExit("No classified candidate points available for kNN extrapolation. Exiting.")
+
+    num_candidates = np.count_nonzero(candidate_mask)
+
+    if num_candidates < 3:
+        raise ValueError("Need at least 3 classified candidate points for kNN extrapolation.")
+
+    k = int(input_k)
+
+    if k < 3:
+        k = 3
+
+    if k % 2 == 0:
+        k += 1
+
+    if k > num_candidates:
+        k = num_candidates
+
+    if k % 2 == 0:
+        k -= 1
     
-    candidate_xyz = pc_glcs_classified[candidate_mask, :3]
-    target_xyz = pc_glcs_classified[target_mask, :3]
+    print(f"Extrapolating Classification with neighborhood: {k} points.")
+
+    xyz = pc_glcs_classified.point.positions.cpu().numpy()
+    candidate_xyz = xyz[candidate_mask]
+    target_xyz = xyz[target_mask]
     candidate_labels = labels[candidate_mask]
 
     tree = cKDTree(candidate_xyz)
@@ -26,7 +57,14 @@ def extrapolate_classification(pc_glcs_classified, neighborhood):
     neighbor_labels = candidate_labels[idx]
     filled_labels = majority_vote(neighbor_labels)
 
-    pc_glcs_filled = pc_glcs_classified.copy()
-    pc_glcs_filled[target_mask,3] = filled_labels
+    pc_glcs_filled = pc_glcs_classified.clone()
+    new_labels = labels.copy()
+    new_labels[target_mask] = filled_labels
+
+    pc_glcs_filled.point.classification = o3d.core.Tensor(
+        new_labels.reshape(-1, 1),
+        dtype=pc_glcs_classified.point.classification.dtype,
+        device=pc_glcs_classified.point.classification.device
+    )
 
     return pc_glcs_filled
