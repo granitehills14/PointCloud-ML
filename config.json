@@ -19,7 +19,8 @@
         "model" : "facebook/sam3"
     },
     "neighborhood" : {
-        "k" : 263,
-        "unclassified_labels" : [0,255]
+        "k" : 29,
+        "unclassified_labels" : [0,255],
+        "batch_size" : 100000
     }
 }

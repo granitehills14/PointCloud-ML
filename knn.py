@@ -12,6 +12,7 @@ def majority_vote(neighbor_labels):
 def extrapolate_classification(pc_glcs_classified, neighborhood):
     input_k = neighborhood["k"]
     unclassified_labels = neighborhood["unclassified_labels"]
+    batch_size = neighborhood["batch_size"]
     
     labels = pc_glcs_classified.point.classification.cpu().numpy().reshape(-1)
     labels = labels.astype(np.int32, copy=False)
@@ -60,18 +61,29 @@ def extrapolate_classification(pc_glcs_classified, neighborhood):
 
     xyz = pc_glcs_classified.point.positions.cpu().numpy()
     candidate_xyz = xyz[candidate_mask]
-    target_xyz = xyz[target_mask]
     candidate_labels = labels[candidate_mask]
 
     tree = cKDTree(candidate_xyz)
-    dist, idx = tree.query(target_xyz, k=k)
-
-    neighbor_labels = candidate_labels[idx]
-    filled_labels = majority_vote(neighbor_labels)
+    target_indices = np.flatnonzero(target_mask)
 
     pc_glcs_filled = pc_glcs_classified.clone()
     new_labels = labels.copy()
-    new_labels[target_mask] = filled_labels
+
+    num_batches = int(np.ceil(len(target_indices) / batch_size))
+
+    for batch_start in range(0, len(target_indices), batch_size):
+        batch_num = batch_start // batch_size + 1
+        print(f"kNN batch {batch_num:,} / {num_batches:,}")
+        batch_indices = target_indices[batch_start:batch_start + batch_size]
+        batch_xyz = xyz[batch_indices]
+
+        _, idx = tree.query(batch_xyz, k=k)
+
+        neighbor_labels = candidate_labels[idx]
+        filled_labels = majority_vote(neighbor_labels)
+
+        new_labels[batch_indices] = filled_labels
+
 
     pc_glcs_filled.point.classification = o3d.core.Tensor(
         new_labels.reshape(-1, 1),
