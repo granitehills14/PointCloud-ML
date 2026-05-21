@@ -16,10 +16,22 @@ def extrapolate_classification(pc_glcs_classified, neighborhood):
     labels = pc_glcs_classified.point.classification.cpu().numpy().reshape(-1)
     labels = labels.astype(np.int32, copy=False)
 
+    unique, counts = np.unique(labels, return_counts=True)
+    print("Pre-kNN label counts:")
+    for u, c in zip(unique, counts):
+        print(f"  label {u}: {c:,}")
+
     target_mask = np.isin(labels, unclassified_labels)
     candidate_mask = ~target_mask
 
+    print(f"kNN target labels: {unclassified_labels}")
+    print(f"kNN target points: {np.count_nonzero(target_mask):,}")
+    print(f"kNN candidate points: {np.count_nonzero(candidate_mask):,}")
+
     if not np.any(target_mask):
+        # return pc_glcs_classified.clone()
+        if not np.any(target_mask):
+        print("No target points matched unclassified_labels. kNN fill skipped.")
         return pc_glcs_classified.clone()
 
     if not np.any(candidate_mask):
@@ -66,5 +78,8 @@ def extrapolate_classification(pc_glcs_classified, neighborhood):
         dtype=pc_glcs_classified.point.classification.dtype,
         device=pc_glcs_classified.point.classification.device
     )
+
+    n_changed = np.count_nonzero(new_labels != labels)
+    print(f"kNN changed {n_changed:,} point labels.")
 
     return pc_glcs_filled
