@@ -19,7 +19,7 @@
         "model" : "facebook/sam3"
     },
     "neighborhood" : {
-        "k" : 131,
+        "k" : 263,
         "unclassified_labels" : [0,255]
     }
 }
