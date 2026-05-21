@@ -31,7 +31,7 @@ def extrapolate_classification(pc_glcs_classified, neighborhood):
     if not np.any(target_mask):
         # return pc_glcs_classified.clone()
         if not np.any(target_mask):
-        print("No target points matched unclassified_labels. kNN fill skipped.")
+            print("No target points matched unclassified_labels. kNN fill skipped.")
         return pc_glcs_classified.clone()
 
     if not np.any(candidate_mask):
